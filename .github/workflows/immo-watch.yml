@@ -1,1 +1,43 @@
 name: Immo-Wächter
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: immo-watch
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Inserate prüfen
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python immo_watch.py
+
+      - name: Gesehene Inserate speichern
+        if: always()
+        run: |
+          git config user.name "immo-bot"
+          git config user.email "immo-bot@users.noreply.github.com"
+          git add seen.json 2>/dev/null || true
+          git diff --cached --quiet || git commit -m "seen.json aktualisiert"
+          git push
