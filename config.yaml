@@ -1,0 +1,119 @@
+# Immo-Wächter Wien: Einstellungen
+# Werte, die du anpassen solltest, sind mit  <-- ANPASSEN  markiert.
+
+# Höchstens so viele Einzelnachrichten pro Durchlauf, danach nur eine Sammelmeldung
+max_messages_per_run: 10
+
+# Steht im Inserat nur die Kaltmiete (Nettomiete, "exkl. BK" usw.), schätzt das Programm
+# die Warmmiete: Kaltmiete + USt + Betriebskosten + Heizung. Mit diesem Wert wird dann
+# gefiltert und gerechnet. Die Werte sind Durchschnitte und lassen sich hier ändern.
+warmmiete:
+  aktiv: true
+  ust_prozent: 10               # Umsatzsteuer auf Wohnungsmiete
+  betriebskosten_pro_m2: 2.6    # € pro m² und Monat (Statistik Austria, 4. Quartal 2025, Österreich)
+  heizkosten_pro_m2: 1.25       # € pro m² und Monat (Mitte der Spanne für Gas, Stand 2022)
+
+# Liefert ein Portal so oft hintereinander nichts, kommt eine Warnung aufs Handy
+warn_after_failures: 6
+
+# Benachrichtigung. Auf GitHub die Werte lieber als "Secrets" hinterlegen
+# (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, NTFY_TOPIC) und hier leer lassen.
+notify:
+  telegram_bot_token: ""
+  telegram_chat_id: ""
+  ntfy_topic: ""          # z.B. "sandro-wohnung-x7k29q" (lang und zufällig wählen, Topics sind öffentlich)
+
+
+# ------------------------------------------------------------------ SUCHEN
+# Welche Seiten abgerufen werden. Jede Suche wird einmal geladen und dann gegen
+# alle Profile geprüft. Das Portal erkennt das Programm an der Adresse.
+#
+# Tipp: Auf der jeweiligen Seite selbst Filter setzen (Mietwohnung, Wien, Preis bis,
+# Zimmer ab), wenn möglich "neueste zuerst" sortieren und die URL hier einsetzen.
+# Dann stehen neue passende Inserate auf den ersten Seiten.
+
+searches:
+  - url: "https://www.willhaben.at/iad/immobilien/mietwohnungen/wien?rows=90&sort=1"
+    pages: 2
+
+  - url: "https://www.immobilienscout24.at/regional/wien/wien/wohnung-mieten"
+    pages: 3
+
+  - url: "https://www.immodirekt.at/mietwohnungen/wien"
+    pages: 1      # immodirekt lädt weitere Seiten nur per JavaScript, Inserate überschneiden sich stark mit ImmoScout24
+
+  - url: "https://immobilien.derstandard.at/suche/wien/mieten-wohnung"
+    pages: 3
+
+  - url: "https://www.immowelt.at/suche/mieten/wohnung/wien/wien-1010/ad08at2093"
+    pages: 3
+
+  - url: "https://www.wg-gesucht.de/wohnungen-in-Wien.163.2.1.0.html"
+    pages: 2
+    # WG-Gesucht zeigt Bots öfter ein Captcha. Wenn nur Warnungen kommen: active: false
+
+  # Weitere Seite ohne eingebauten Leser? So geht's (Muster muss eine Gruppe (?P<id>...) enthalten):
+  # - url: "https://www.beispiel.at/mietwohnungen/wien"
+  #   name: "Beispielportal"
+  #   link_pattern: "beispiel\\.at/objekt/(?P<id>\\d+)"
+  #   pages: 1
+
+
+# ------------------------------------------------------------------ PROFILE
+# Wogegen jedes gefundene Inserat geprüft wird.
+# Mögliche Filter: max_price, min_price, min_area, max_area, min_rooms, max_rooms,
+# postcodes, include_keywords, exclude_keywords, sources (nur bestimmte Portale),
+# allow_missing_price (Inserate ohne Preisangabe trotzdem melden).
+
+# Bezirke: innere Bezirke 1-9, dazu Favoriten, Ottakring, Hernals
+# und die bisherigen über der Donau. Wird in beiden Profilen verwendet.
+wu_nahe_bezirke: &bezirke
+  - "1010"   # Innere Stadt
+  - "1020"   # Leopoldstadt (WU)
+  - "1030"   # Landstraße
+  - "1040"   # Wieden
+  - "1050"   # Margareten
+  - "1060"   # Mariahilf
+  - "1070"   # Neubau
+  - "1080"   # Josefstadt
+  - "1090"   # Alsergrund
+  - "1100"   # Favoriten
+  - "1160"   # Ottakring
+  - "1170"   # Hernals
+  - "1200"   # Brigittenau
+  - "1210"   # Floridsdorf
+  - "1220"   # Donaustadt
+
+profiles:
+
+  - name: "WG-Wohnung (3 SZ + WZ)"
+    active: true
+    max_price: 1900        # Gesamtmiete in €  <-- ANPASSEN
+    min_rooms: 4           # Portale zählen alle Zimmer: 3 Schlafzimmer + Wohnzimmer = 4
+    min_area: 75           # m²  <-- ANPASSEN
+    split_persons: [3, 4]  # zeigt in der Nachricht die Miete pro Kopf und den WG-Hinweis
+    postcodes: *bezirke
+    exclude_keywords:
+      - "wohnungstausch"
+      - "tauschwohnung"
+      - "tausche"
+      - "kurzzeitmiete"
+      - "ferienwohnung"
+      - "befristet auf 1 jahr"
+      - "keine wg"
+      - "nicht wg"
+      - "wg ungeeignet"
+      - "keine wohngemeinschaft"
+
+  - name: "Garçonniere"
+    active: true
+    max_price: 750         # Gesamtmiete in €  <-- ANPASSEN
+    max_rooms: 1.5
+    min_area: 22
+    postcodes: *bezirke
+    exclude_keywords:
+      - "wohnungstausch"
+      - "tauschwohnung"
+      - "tausche"
+      - "kurzzeitmiete"
+      - "ferienwohnung"
