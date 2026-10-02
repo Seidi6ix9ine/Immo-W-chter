@@ -56,15 +56,24 @@ searches:
 # postcodes, include_keywords, exclude_keywords, sources (nur bestimmte Portale),
 # allow_missing_price (Inserate ohne Preisangabe trotzdem melden).
 
-# Bezirke rund um die WU (1020). Wird in beiden Profilen verwendet.
+# Bezirke: innere Bezirke 1-9, dazu Favoriten, Ottakring, Hernals
+# und die bisherigen über der Donau. Wird in beiden Profilen verwendet.
 wu_nahe_bezirke: &bezirke
   - "1010"   # Innere Stadt
   - "1020"   # Leopoldstadt (WU)
   - "1030"   # Landstraße
+  - "1040"   # Wieden
+  - "1050"   # Margareten
+  - "1060"   # Mariahilf
+  - "1070"   # Neubau
+  - "1080"   # Josefstadt
   - "1090"   # Alsergrund
+  - "1100"   # Favoriten
+  - "1160"   # Ottakring
+  - "1170"   # Hernals
   - "1200"   # Brigittenau
   - "1210"   # Floridsdorf
-  - "1220"   # Donaustadt (Kaisermühlen, U1)
+  - "1220"   # Donaustadt
 
 profiles:
 
@@ -73,6 +82,7 @@ profiles:
     max_price: 1900        # Gesamtmiete in €  <-- ANPASSEN
     min_rooms: 4           # Portale zählen alle Zimmer: 3 Schlafzimmer + Wohnzimmer = 4
     min_area: 75           # m²  <-- ANPASSEN
+    split_persons: [3, 4]  # zeigt in der Nachricht die Miete pro Kopf und den WG-Hinweis
     postcodes: *bezirke
     exclude_keywords:
       - "wohnungstausch"

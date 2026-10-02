@@ -15,6 +15,7 @@ Aufruf:
   python immo_watch.py --test-notify   Testnachricht schicken
 """
 import argparse
+import html as html_lib
 import json
 import os
 import random
@@ -489,7 +490,8 @@ def fingerprint(l):
 
 # ================================================================ Benachrichtigung
 
-def notify(cfg, text, click_url=None, title="Neue Wohnung"):
+def notify(cfg, text, click_url=None, title="Neue Wohnung", html=None):
+    """text = reiner Text (ntfy), html = formatierte Fassung für Telegram (optional)."""
     n = cfg.get("notify") or {}
     token = os.getenv("TELEGRAM_BOT_TOKEN") or n.get("telegram_bot_token")
     chat = os.getenv("TELEGRAM_CHAT_ID") or n.get("telegram_chat_id")
@@ -499,7 +501,11 @@ def notify(cfg, text, click_url=None, title="Neue Wohnung"):
     if token and chat:
         try:
             r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
-                              json={"chat_id": chat, "text": text}, timeout=20)
+                              json={"chat_id": chat, "text": html or text,
+                                    **({"parse_mode": "HTML"} if html else {})}, timeout=20)
+            if html and r.status_code == 400:   # Formatierung abgelehnt -> als reinen Text senden
+                r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                                  json={"chat_id": chat, "text": text}, timeout=20)
             r.raise_for_status()
             sent = True
         except Exception as e:
@@ -521,16 +527,80 @@ def notify(cfg, text, click_url=None, title="Neue Wohnung"):
     return sent
 
 
-def message_for(l, profile_name):
-    plz, loc = l["postcode"] or "", l["location"] or ""
-    place = loc if plz and plz in loc else f"{plz} {loc}".strip() or "Wien"
-    return (
-        f"🏠 {profile_name} · {l['source']}\n"
-        f"{l['title']}\n"
-        f"💶 {fmt(l['price'], ' €')} · 📐 {fmt(l['area'], ' m²')} · 🚪 {fmt(l['rooms'])} Zi.\n"
-        f"📍 {place}\n"
-        f"{l['url']}"
-    )
+WG_YES = re.compile(r"wg[- ]?(?:geeignet|tauglich|fähig|möglich|freundlich)|für\s+wgs?\b|"
+                    r"wohngemeinschaft(?:en)?\s+(?:möglich|willkommen|geeignet)|studenten-?wg", re.I)
+WG_NO = re.compile(r"(?:keine?|nicht)\s+(?:für\s+)?(?:wgs?\b|wohngemeinschaft)|wg[- ]?ungeeignet", re.I)
+
+
+def size_class(area):
+    return "klein" if area < 40 else "mittel" if area < 75 else "groß"
+
+
+def market_average(listings):
+    """Durchschnittlicher Preis pro m² aus allen in diesem Lauf geladenen Inseraten,
+    getrennt nach Größenklasse (kleine Wohnungen sind pro m² immer teurer)."""
+    seen, vals = set(), {"alle": []}
+    for l in listings:
+        if not l["price"] or not l["area"]:
+            continue
+        key = fingerprint(l) or l["id"]
+        if key in seen:
+            continue
+        seen.add(key)
+        v = l["price"] / l["area"]
+        if 5 <= v <= 60:           # Ausreißer und Lesefehler raus
+            vals["alle"].append(v)
+            vals.setdefault(size_class(l["area"]), []).append(v)
+    return {k: sum(v) / len(v) for k, v in vals.items() if len(v) >= (30 if k == "alle" else 15)}
+
+
+def average_for(avg, area):
+    """Schnitt der passenden Größenklasse, sonst Gesamtschnitt, sonst None."""
+    return (avg or {}).get(size_class(area)) or (avg or {}).get("alle")
+
+
+def price_rating(ppm, avg):
+    d = (ppm - avg) / avg
+    if d <= -0.25:
+        return "🟢🟢 stark unter Marktpreis"
+    if d <= -0.10:
+        return "🟢 unter Marktpreis"
+    if d < 0.10:
+        return "🟡 im Marktschnitt"
+    if d < 0.25:
+        return "🟠 über Marktpreis"
+    return "🔴 deutlich über Marktpreis"
+
+
+def message_for(l, profile, avg=None):
+    """Gibt (reiner Text, HTML für Telegram) zurück."""
+    esc = html_lib.escape
+    head = " · ".join(x for x in [
+        l["postcode"] or "Wien",
+        f"{l['area']:g} m²".replace(".", ",") if l["area"] else None,
+        f"{fmt(l['rooms'])} Zi" if l["rooms"] else None,
+    ] if x)
+    lines = [f"<b>{esc(head)}</b>", esc(l["title"]), ""]
+
+    lines.append(f"Miete: <b>{fmt(l['price'], ' €')}</b>" if l["price"] else "Miete: keine Angabe")
+    if l["price"] and l["area"]:
+        ppm = l["price"] / l["area"]
+        lines.append(f"Pro m²: {fmt(round(ppm, 2), ' €')}")
+        ref = average_for(avg, l["area"])
+        if ref:
+            lines.append(f"{price_rating(ppm, ref)} (Schnitt {fmt(round(ref, 2), ' €/m²')})")
+
+    persons = profile.get("split_persons") or []
+    text = l["title"] + " " + l["text"]
+    if persons and WG_YES.search(text) and not WG_NO.search(text):
+        lines.append("✅ ausdrücklich WG-geeignet")
+    if persons and l["price"]:
+        lines += ["", " · ".join(f"{n} Pers.: {fmt(round(l['price'] / n), ' €')}" for n in persons)]
+
+    lines += ["", f"{esc(l['source'])}: {esc(l['url'])}", f"<i>Suchprofil: {esc(profile['name'])}</i>"]
+    html = "\n".join(lines)
+    plain = html_lib.unescape(re.sub(r"</?[bi]>", "", html))
+    return plain, html
 
 
 # ================================================================ Zustand
@@ -564,7 +634,7 @@ def run_once(cfg, dry_run=False):
     warn_after = cfg.get("warn_after_failures", 6)
     profiles = active_profiles(cfg)
     searches = active_searches(cfg)
-    hits, failed = [], 0
+    hits, failed, loaded = [], 0, []
 
     for search in searches:
         skey = f"fail|{search['url']}"
@@ -583,33 +653,38 @@ def run_once(cfg, dry_run=False):
             continue
         state.pop(skey, None)
         log(f"{label}: {len(listings)} Inserate erkannt")
+        loaded.extend(listings)
 
-        for l in listings:
-            for p in profiles:
-                key = f"{p['name']}|{l['id']}"
-                if key in state:
-                    continue
-                ok, _ = matches(l, p)
-                if ok:
-                    hits.append((p["name"], l))
-                if not dry_run:
-                    state[key] = now
+    avg = market_average(loaded)
+    if avg:
+        log("Marktschnitt aus diesem Lauf: " + ", ".join(f"{k} {v:.2f} €/m²" for k, v in avg.items()))
+
+    for l in loaded:
+        for p in profiles:
+            key = f"{p['name']}|{l['id']}"
+            if key in state:
+                continue
+            ok, _ = matches(l, p)
+            if ok:
+                hits.append((p, l))
+            if not dry_run:
+                state[key] = now
 
     # Duplikate über Portale hinweg aussortieren
     fresh = []
-    for name, l in hits:
+    for p, l in hits:
         fp = fingerprint(l)
-        k = f"{fp}|{name}" if fp else None
+        k = f"{fp}|{p['name']}" if fp else None
         if k and k in state:
             continue
         if k:
             state[k] = now
-        fresh.append((name, l))
+        fresh.append((p, l))
 
     if dry_run:
-        for name, l in fresh:
+        for p, l in fresh:
             print("-" * 60)
-            print(message_for(l, name))
+            print(message_for(l, p, avg)[0])
         log(f"Dry-Run: {len(fresh)} Treffer, nichts gesendet")
         return
 
@@ -618,8 +693,9 @@ def run_once(cfg, dry_run=False):
                     f"{len(fresh)} bereits vorhandene Treffer wurden übersprungen, "
                     f"ab jetzt kommen nur neue Inserate.", title="Immo-Wächter")
     else:
-        for name, l in fresh[:max_msgs]:
-            notify(cfg, message_for(l, name), l["url"])
+        for p, l in fresh[:max_msgs]:
+            plain, html = message_for(l, p, avg)
+            notify(cfg, plain, l["url"], html=html)
             time.sleep(1)
         if len(fresh) > max_msgs:
             notify(cfg, f"… und {len(fresh) - max_msgs} weitere Treffer. Filter evtl. enger stellen.")
